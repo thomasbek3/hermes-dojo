@@ -82,7 +82,7 @@ For each identified weakness, decide the fix:
 4. Log the creation
 
 **C) Skill exists but needs deeper improvement → run self-evolution:**
-1. Run: `cd ~/.hermes/hermes-agent-self-evolution && python3 -m evolution.skills.evolve_skill --skill <name> --iterations 5 --eval-source synthetic`
+1. Run: `cd ~/.hermes/hermes-agent-self-evolution && .venv/bin/python3 -m evolution.skills.evolve_skill --skill <name> --hermes-repo ~/.hermes --iterations 5 --eval-source synthetic`
 2. This uses GEPA to analyze execution traces and propose targeted improvements
 3. Review the evolution output — accept if score improved
 4. Log before/after scores

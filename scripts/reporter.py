@@ -120,7 +120,8 @@ def _telegram_report(
             sparkline = "".join(
                 blocks[min(8, int((r - min_r) / span * 8))] for r in rates
             )
-            lines.append(f"\n📉 Trend: [{sparkline}]")
+            trend_emoji = "📈" if rates[-1] >= rates[0] else "📉"
+            lines.append(f"\n{trend_emoji} Trend: [{sparkline}]")
     except Exception:
         pass
 
