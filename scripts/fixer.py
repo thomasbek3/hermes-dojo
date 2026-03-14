@@ -447,6 +447,27 @@ Most common error pattern observed: `{top_error[:100] if top_error else 'unknown
     return content
 
 
+def _load_openrouter_key() -> str:
+    """Load OPENROUTER_API_KEY from Hermes .env file or environment."""
+    # Check environment first
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    if key:
+        return key
+
+    # Fall back to Hermes .env
+    env_file = HERMES_HOME / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("OPENROUTER_API_KEY=") and not line.startswith("#"):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+# Default model for self-evolution — Nous Hermes via OpenRouter
+DEFAULT_EVOLUTION_MODEL = "openrouter/nousresearch/hermes-3-llama-3.1-70b"
+
+
 def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -> dict:
     """Run self-evolution on a skill via the hermes-agent-self-evolution CLI."""
     result = {
@@ -460,14 +481,21 @@ def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -
     if dry_run:
         result["status"] = "dry_run"
         result["command"] = (
-            f"cd {EVOLUTION_DIR} && {EVOLUTION_VENV} -m evolution.skills.evolve_skill "
-            f"--skill {skill_name} --iterations {iterations}"
+            f"cd {EVOLUTION_DIR} && OPENROUTER_API_KEY=<key> {EVOLUTION_VENV} -m evolution.skills.evolve_skill "
+            f"--skill {skill_name} --hermes-repo {HERMES_HOME} --iterations {iterations} "
+            f"--optimizer-model {DEFAULT_EVOLUTION_MODEL} --eval-model {DEFAULT_EVOLUTION_MODEL}"
         )
         return result
 
     if not EVOLUTION_VENV.exists():
         result["status"] = "error"
-        result["error"] = "Self-evolution venv not found. Run: cd ~/.hermes/hermes-agent-self-evolution && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
+        result["error"] = "Self-evolution venv not found. Run: cd ~/.hermes/hermes-agent-self-evolution && python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
+        return result
+
+    api_key = _load_openrouter_key()
+    if not api_key:
+        result["status"] = "error"
+        result["error"] = "OPENROUTER_API_KEY not set. Add it to ~/.hermes/.env or set as environment variable."
         return result
 
     try:
@@ -475,8 +503,14 @@ def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -
             str(EVOLUTION_VENV),
             "-m", "evolution.skills.evolve_skill",
             "--skill", skill_name,
+            "--hermes-repo", str(HERMES_HOME),
             "--iterations", str(iterations),
+            "--optimizer-model", DEFAULT_EVOLUTION_MODEL,
+            "--eval-model", DEFAULT_EVOLUTION_MODEL,
         ]
+
+        env = os.environ.copy()
+        env["OPENROUTER_API_KEY"] = api_key
 
         proc = subprocess.run(
             cmd,
@@ -484,6 +518,7 @@ def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -
             text=True,
             timeout=300,
             cwd=str(EVOLUTION_DIR),
+            env=env,
         )
 
         if proc.returncode == 0:
