@@ -14,8 +14,11 @@
 In terminal, run:
 ```bash
 cd ~/.hermes/skills/hermes-dojo/scripts
-python3 monitor.py
+python3 demo.py --reset --multi-day
 ```
+This seeds demo data + a 5-day learning curve, then runs the full pipeline.
+
+Or for individual steps:
 
 Point out: "55% success rate. web_extract fails 100% of the time. The agent keeps timing out on web scraping and users keep correcting wrong git branches. 13 times users had to say 'no, I meant...'"
 
