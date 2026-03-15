@@ -65,8 +65,11 @@ def save_snapshot(monitor_data: dict, improvements: list[dict] = None):
     cutoff = time.time() - (90 * 86400)
     history = [h for h in history if h.get("timestamp", 0) > cutoff]
 
-    with open(METRICS_FILE, "w") as f:
+    # Atomic write: write to temp file then rename to prevent corruption on interrupt
+    tmp_file = METRICS_FILE.with_suffix(".tmp")
+    with open(tmp_file, "w") as f:
         json.dump(history, f, indent=2)
+    tmp_file.replace(METRICS_FILE)
 
     return snapshot
 

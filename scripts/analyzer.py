@@ -94,7 +94,9 @@ def generate_recommendations(monitor_data: dict) -> list[dict[str, Any]]:
     # 2. Create recommendations for skill gaps
     for gap in monitor_data.get("skill_gaps", []):
         cap = gap["capability"]
-        if cap not in existing_skills:
+        # Use fuzzy match (same as tool-to-skill mapping) to avoid
+        # recommending skills that already exist under a similar name
+        if not map_tool_to_skill(cap, existing_skills):
             recommendations.append({
                 "action": "create",
                 "priority": gap["requests"] * 10,

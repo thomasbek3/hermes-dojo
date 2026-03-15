@@ -409,6 +409,8 @@ def _build_skill_content(skill_name: str, error_type: str, top_error: str, reaso
 
     # Generate a skill that's actually useful, not boilerplate
     human_name = skill_name.replace('-', ' ').title()
+    # Sanitize for YAML embedding (escape quotes, strip newlines)
+    safe_reason = reason.replace('"', "'").replace("\n", " ")
     content = f"""---
 name: {skill_name}
 description: Handle {skill_name.replace('-', ' ')} tasks based on observed user request patterns.
@@ -417,7 +419,7 @@ metadata:
   hermes:
     tags: [{', '.join(skill_name.split('-'))}]
     generated_by: hermes-dojo
-    generated_reason: "{reason}"
+    generated_reason: "{safe_reason}"
 ---
 
 # {human_name}
@@ -460,7 +462,11 @@ def _load_openrouter_key() -> str:
         for line in env_file.read_text().splitlines():
             line = line.strip()
             if line.startswith("OPENROUTER_API_KEY=") and not line.startswith("#"):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
+                val = line.split("=", 1)[1].strip()
+                # Strip inline comments (e.g., KEY=value # comment)
+                if " #" in val:
+                    val = val[:val.index(" #")].strip()
+                return val.strip('"').strip("'")
     return ""
 
 
