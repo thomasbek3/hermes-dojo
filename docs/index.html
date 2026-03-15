@@ -3,541 +3,610 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hermes Dojo — Self-Improving AI Agent</title>
-<meta name="description" content="Your AI agent makes the same mistakes every day. Hermes Dojo reads session logs, finds repeat failures, and creates skills to fix them.">
+<title>Hermes Dojo</title>
+<meta name="description" content="Self-improvement feedback loop for Hermes Agent. Reads session logs, finds repeat failures, creates skills to fix them.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-
 :root{
-  --bg:#0a0a0f;
-  --bg-raised:#111118;
-  --bg-subtle:#16161f;
-  --text-primary:rgba(255,255,255,0.87);
-  --text-secondary:rgba(255,255,255,0.55);
-  --text-muted:rgba(255,255,255,0.35);
-  --accent:#d4a843;
-  --accent-dim:rgba(212,168,67,0.15);
-  --accent-glow:rgba(212,168,67,0.08);
-  --border:rgba(255,255,255,0.08);
+  --bg:#09090e;
+  --surface:#0f0f16;
+  --elevated:#17171f;
+  --border:rgba(255,255,255,0.06);
+  --border-strong:rgba(255,255,255,0.1);
+  --text-1:#ededed;
+  --text-2:#9a9aaa;
+  --text-3:#5c5c6e;
+  --accent:#c9a227;
+  --accent-soft:rgba(201,162,39,0.12);
+  --green:#34d399;
+  --red:#f87171;
   --font-display:'Space Grotesk',system-ui,sans-serif;
   --font-body:'Inter',system-ui,sans-serif;
-  --font-mono:'JetBrains Mono',monospace;
+  --font-mono:'JetBrains Mono','SF Mono',monospace;
 }
+html{font-size:16px;scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text-1);font-family:var(--font-body);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
 
-html{font-size:17px;scroll-behavior:smooth}
-body{
-  background:var(--bg);
-  color:var(--text-primary);
-  font-family:var(--font-body);
-  line-height:1.6;
-  -webkit-font-smoothing:antialiased;
-  overflow-x:hidden;
+/* ── Buttons ── */
+.hero-buttons{display:flex;gap:12px;margin-bottom:48px;flex-wrap:wrap}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--font-body);font-size:14px;font-weight:500;
+  padding:10px 20px;border-radius:6px;
+  border:1px solid var(--border-strong);
+  background:var(--surface);color:var(--text-1);
+  text-decoration:none;transition:all 0.15s;cursor:pointer;
 }
+.btn:hover{border-color:rgba(255,255,255,0.2);background:var(--elevated);text-decoration:none}
+.btn-primary{background:var(--accent);color:#09090e;border-color:var(--accent)}
+.btn-primary:hover{opacity:0.9;text-decoration:none}
 
-a{color:var(--accent);text-decoration:none;transition:opacity 0.15s}
-a:hover{opacity:0.8}
-
-.container{max-width:1080px;margin:0 auto;padding:0 24px}
+/* ── Layout ── */
+.wrap{max-width:960px;margin:0 auto;padding:0 24px}
 
 /* ── Hero ── */
 .hero{
-  padding:96px 0 80px;
-  text-align:center;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
   position:relative;
+  padding:64px 0;
 }
-.hero::before{
-  content:'';
+.hero-glow{
   position:absolute;
-  top:-200px;left:50%;
+  top:15%;left:50%;
+  width:500px;height:500px;
   transform:translateX(-50%);
-  width:600px;height:600px;
-  background:radial-gradient(circle,var(--accent-glow) 0%,transparent 70%);
+  background:radial-gradient(ellipse,rgba(201,162,39,0.06) 0%,transparent 70%);
   pointer-events:none;
 }
-.hero-badge{
-  display:inline-block;
-  font-family:var(--font-mono);
-  font-size:0.75rem;
+.hero-top{
+  display:flex;
+  align-items:baseline;
+  gap:16px;
+  margin-bottom:48px;
+}
+.hero-name{
+  font-family:var(--font-display);
+  font-size:15px;
   font-weight:500;
-  letter-spacing:0.08em;
+  letter-spacing:0.06em;
   text-transform:uppercase;
   color:var(--accent);
-  background:var(--accent-dim);
-  border:1px solid rgba(212,168,67,0.2);
-  padding:6px 14px;
-  border-radius:4px;
-  margin-bottom:32px;
+}
+.hero-tag{
+  font-size:13px;
+  color:var(--text-3);
 }
 .hero h1{
   font-family:var(--font-display);
-  font-size:3.2rem;
-  font-weight:600;
-  line-height:1.1;
-  letter-spacing:-0.02em;
-  margin-bottom:20px;
-  max-width:700px;
-  margin-left:auto;
-  margin-right:auto;
+  font-size:clamp(2.4rem,5vw,3.8rem);
+  font-weight:300;
+  line-height:1.08;
+  letter-spacing:-0.03em;
+  margin-bottom:24px;
+  max-width:680px;
 }
-.hero p{
-  font-size:1.1rem;
-  color:var(--text-secondary);
-  max-width:520px;
-  margin:0 auto 40px;
-  line-height:1.65;
-}
-.hero-buttons{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.btn{
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-  font-family:var(--font-body);
-  font-size:0.88rem;
-  font-weight:500;
-  padding:10px 20px;
-  border-radius:6px;
-  border:1px solid var(--border);
-  background:var(--bg-raised);
-  color:var(--text-primary);
-  transition:all 0.15s;
-  cursor:pointer;
-}
-.btn:hover{border-color:rgba(255,255,255,0.2);background:var(--bg-subtle)}
-.btn-primary{
-  background:var(--accent);
-  color:#0a0a0f;
-  border-color:var(--accent);
-}
-.btn-primary:hover{opacity:0.9;border-color:var(--accent)}
-.btn svg{width:16px;height:16px;fill:currentColor}
-
-/* ── Section shared ── */
-section{padding:80px 0}
-.section-label{
-  font-family:var(--font-mono);
-  font-size:0.72rem;
-  font-weight:500;
-  letter-spacing:0.1em;
-  text-transform:uppercase;
-  color:var(--accent);
-  margin-bottom:16px;
-}
-.section-title{
-  font-family:var(--font-display);
-  font-size:2rem;
-  font-weight:600;
-  line-height:1.15;
-  letter-spacing:-0.01em;
-  margin-bottom:16px;
-}
-.section-desc{
-  color:var(--text-secondary);
-  max-width:540px;
-  line-height:1.65;
+.hero h1 strong{font-weight:600}
+.hero-sub{
+  font-size:17px;
+  color:var(--text-2);
+  line-height:1.6;
+  max-width:480px;
   margin-bottom:48px;
 }
 
-/* ── Problem ── */
-.problem-grid{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:1px;
-  background:var(--border);
-  border:1px solid var(--border);
-  border-radius:8px;
+/* ── Terminal ── */
+.term{
+  background:var(--surface);
+  border:1px solid var(--border-strong);
+  border-radius:10px;
   overflow:hidden;
+  max-width:720px;
+  box-shadow:0 4px 24px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.02);
 }
-.problem-card{
-  background:var(--bg);
-  padding:32px 28px;
+.term-bar{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:14px 18px;
+  background:var(--elevated);
+  border-bottom:1px solid var(--border);
 }
-.problem-card h3{
-  font-family:var(--font-display);
-  font-size:1.05rem;
-  font-weight:600;
-  margin-bottom:8px;
+.term-dot{width:10px;height:10px;border-radius:50%}
+.term-dot:nth-child(1){background:#ff5f57}
+.term-dot:nth-child(2){background:#febc2e}
+.term-dot:nth-child(3){background:#28c840}
+.term-title{
+  flex:1;
+  text-align:center;
+  font-family:var(--font-mono);
+  font-size:12px;
+  color:var(--text-3);
+  margin-right:36px;
 }
-.problem-card p{
-  color:var(--text-secondary);
-  font-size:0.88rem;
-  line-height:1.6;
+.term-body{
+  padding:20px 22px;
+  font-family:var(--font-mono);
+  font-size:13px;
+  line-height:1.75;
+  color:var(--text-2);
+}
+.term-body .prompt{color:var(--green)}
+.term-body .cmd{color:var(--text-1)}
+.term-body .accent{color:var(--accent)}
+.term-body .muted{color:var(--text-3)}
+.term-body .good{color:var(--green)}
+.term-body .bad{color:var(--red)}
+.term-body .line{display:block}
+.cursor{
+  display:inline-block;
+  width:8px;height:16px;
+  background:var(--accent);
+  vertical-align:text-bottom;
+  animation:blink 1s step-end infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* ── Divider ── */
+.divider{
+  width:1px;height:96px;
+  background:linear-gradient(to bottom,var(--border-strong),transparent);
+  margin:0 auto;
 }
 
-/* ── How It Works ── */
-.steps{
-  display:flex;
-  flex-direction:column;
+/* ── Section ── */
+.section{padding:80px 0}
+.section-label{
+  font-family:var(--font-mono);
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:0.12em;
+  text-transform:uppercase;
+  color:var(--text-3);
+  margin-bottom:24px;
+}
+
+/* ── The Loop ── */
+.loop-title{
+  font-family:var(--font-display);
+  font-size:clamp(1.6rem,3vw,2.4rem);
+  font-weight:300;
+  line-height:1.15;
+  letter-spacing:-0.02em;
+  margin-bottom:64px;
+  max-width:520px;
+}
+.loop-title strong{font-weight:600;color:var(--accent)}
+.loop-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr 1fr 1fr;
   gap:0;
   position:relative;
 }
-.step{
-  display:grid;
-  grid-template-columns:48px 1fr;
-  gap:24px;
-  padding:24px 0;
-  border-bottom:1px solid var(--border);
+.loop-grid::before{
+  content:'';
+  position:absolute;
+  top:20px;left:10%;right:10%;
+  height:1px;
+  background:linear-gradient(to right,transparent,var(--border-strong) 15%,var(--border-strong) 85%,transparent);
 }
-.step:last-child{border-bottom:none}
-.step-num{
-  font-family:var(--font-mono);
-  font-size:0.82rem;
-  font-weight:500;
-  color:var(--accent);
-  padding-top:2px;
+.loop-step{
+  text-align:center;
+  position:relative;
+  padding:0 8px;
 }
-.step h3{
+.loop-dot{
+  width:8px;height:8px;
+  border-radius:50%;
+  background:var(--accent);
+  margin:16px auto 20px;
+  position:relative;
+  z-index:1;
+}
+.loop-step h3{
   font-family:var(--font-display);
-  font-size:1.05rem;
+  font-size:15px;
   font-weight:600;
-  margin-bottom:4px;
+  margin-bottom:8px;
 }
-.step p{
-  color:var(--text-secondary);
-  font-size:0.88rem;
-  line-height:1.6;
+.loop-step p{
+  font-size:13px;
+  color:var(--text-3);
+  line-height:1.55;
 }
 
-/* ── Proof ── */
-.proof-container{
+/* ── Before/After ── */
+.compare{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:1px;
+  background:var(--border);
   border:1px solid var(--border);
-  border-radius:8px;
+  border-radius:10px;
   overflow:hidden;
+  margin-top:64px;
 }
-.proof-header{
-  background:var(--bg-raised);
-  padding:16px 24px;
-  border-bottom:1px solid var(--border);
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-.proof-dot{width:8px;height:8px;border-radius:50%;background:var(--text-muted)}
-.proof-dot.green{background:#4ade80}
-.proof-dot.yellow{background:var(--accent)}
-.proof-header span{
-  font-family:var(--font-mono);
-  font-size:0.75rem;
-  color:var(--text-muted);
-  margin-left:8px;
-}
-.proof-body{
+.compare-side{
   background:var(--bg);
   padding:32px 28px;
+}
+.compare-label{
   font-family:var(--font-mono);
-  font-size:0.82rem;
-  line-height:1.8;
-  color:var(--text-secondary);
-  overflow-x:auto;
-}
-.proof-body .highlight{color:var(--accent);font-weight:500}
-.proof-body .success{color:#4ade80}
-.proof-body .dim{color:var(--text-muted)}
-
-.proof-bar-row{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  margin:4px 0;
-}
-.proof-bar{
-  height:6px;
-  border-radius:3px;
-  background:var(--accent);
-  transition:width 0.3s;
-}
-.proof-bar.low{background:rgba(212,168,67,0.4)}
-
-/* ── Video ── */
-.video-wrapper{
-  position:relative;
-  width:100%;
-  max-width:800px;
-  margin:0 auto;
-  aspect-ratio:16/9;
-  border:1px solid var(--border);
-  border-radius:8px;
-  overflow:hidden;
-  background:var(--bg-raised);
-}
-.video-wrapper iframe{
-  width:100%;
-  height:100%;
-  border:none;
-}
-.video-placeholder{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:center;
-  height:100%;
-  color:var(--text-muted);
-  font-family:var(--font-mono);
-  font-size:0.82rem;
-  gap:12px;
-}
-.video-placeholder svg{width:48px;height:48px;opacity:0.3}
-
-/* ── Quick Start ── */
-.code-block{
-  background:var(--bg-raised);
-  border:1px solid var(--border);
-  border-radius:8px;
-  overflow:hidden;
-  max-width:640px;
-}
-.code-header{
-  padding:12px 20px;
-  border-bottom:1px solid var(--border);
-  font-family:var(--font-mono);
-  font-size:0.72rem;
-  color:var(--text-muted);
-  text-transform:uppercase;
-  letter-spacing:0.08em;
-}
-.code-body{
-  padding:20px;
-  font-family:var(--font-mono);
-  font-size:0.82rem;
-  line-height:1.8;
-  color:var(--text-secondary);
-  overflow-x:auto;
-}
-.code-body .comment{color:var(--text-muted);display:block}
-.code-body .cmd{color:var(--text-primary);display:block}
-
-/* ── Features table ── */
-.features-table{
-  width:100%;
-  max-width:640px;
-  border-collapse:collapse;
-  margin-top:32px;
-}
-.features-table th,.features-table td{
-  text-align:left;
-  padding:10px 16px;
-  font-size:0.85rem;
-  border-bottom:1px solid var(--border);
-}
-.features-table th{
-  font-family:var(--font-mono);
-  font-size:0.72rem;
+  font-size:11px;
   font-weight:500;
+  letter-spacing:0.1em;
   text-transform:uppercase;
-  letter-spacing:0.08em;
-  color:var(--text-muted);
+  margin-bottom:20px;
 }
-.features-table td:first-child{
+.compare-side:first-child .compare-label{color:var(--red)}
+.compare-side:last-child .compare-label{color:var(--green)}
+.compare-line{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:6px 0;
+  font-size:13px;
+  color:var(--text-2);
+}
+.compare-line .dot{
+  width:5px;height:5px;
+  border-radius:50%;
+  flex-shrink:0;
+}
+.compare-side:first-child .dot{background:var(--red)}
+.compare-side:last-child .dot{background:var(--green)}
+
+/* ── Results ── */
+.results{margin-top:80px}
+.results-title{
+  font-family:var(--font-display);
+  font-size:clamp(1.4rem,2.5vw,2rem);
+  font-weight:300;
+  letter-spacing:-0.02em;
+  margin-bottom:8px;
+}
+.results-title strong{font-weight:600}
+.results-sub{
+  font-size:15px;
+  color:var(--text-3);
+  margin-bottom:40px;
+}
+.results-bars{max-width:560px}
+.bar-row{
+  display:grid;
+  grid-template-columns:56px 56px 1fr;
+  align-items:center;
+  gap:16px;
+  margin:10px 0;
+}
+.bar-label{
   font-family:var(--font-mono);
+  font-size:12px;
+  color:var(--text-3);
+}
+.bar-pct{
+  font-family:var(--font-mono);
+  font-size:13px;
+  font-weight:500;
+  text-align:right;
+}
+.bar-track{
+  height:4px;
+  background:var(--elevated);
+  border-radius:2px;
+  overflow:hidden;
+}
+.bar-fill{
+  height:100%;
+  border-radius:2px;
+  transition:width 1.2s cubic-bezier(0.16,1,0.3,1);
+}
+.bar-row:nth-child(-n+2) .bar-pct{color:var(--text-3)}
+.bar-row:nth-child(-n+2) .bar-fill{background:rgba(201,162,39,0.3)}
+.bar-row:nth-child(3) .bar-pct,.bar-row:nth-child(4) .bar-pct{color:var(--accent)}
+.bar-row:nth-child(3) .bar-fill,.bar-row:nth-child(4) .bar-fill{background:var(--accent)}
+.bar-row:nth-child(5) .bar-pct{color:var(--green)}
+.bar-row:nth-child(5) .bar-fill{background:var(--green)}
+
+.trend-line{
+  margin-top:24px;
+  font-family:var(--font-mono);
+  font-size:13px;
+  color:var(--text-3);
+}
+.trend-line strong{color:var(--green);font-weight:500}
+
+/* ── Features ── */
+.feat-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:1px;
+  background:var(--border);
+  border:1px solid var(--border);
+  border-radius:10px;
+  overflow:hidden;
+  margin-top:48px;
+}
+.feat{
+  background:var(--bg);
+  padding:24px;
+}
+.feat-name{
+  font-family:var(--font-mono);
+  font-size:12px;
   color:var(--accent);
-  font-size:0.82rem;
+  margin-bottom:6px;
 }
-.features-table td:last-child{
-  color:var(--text-secondary);
+.feat-desc{
+  font-size:14px;
+  color:var(--text-3);
+  line-height:1.5;
 }
+
+/* ── Install ── */
+.install{
+  margin-top:80px;
+  padding-top:80px;
+  border-top:1px solid var(--border);
+}
+.install-title{
+  font-family:var(--font-display);
+  font-size:clamp(1.4rem,2.5vw,2rem);
+  font-weight:300;
+  letter-spacing:-0.02em;
+  margin-bottom:32px;
+}
+.install-title strong{font-weight:600}
 
 /* ── Footer ── */
 footer{
-  padding:48px 0;
+  margin-top:96px;
+  padding:32px 0;
   border-top:1px solid var(--border);
-  text-align:center;
 }
-footer p{
-  font-size:0.82rem;
-  color:var(--text-muted);
-  line-height:1.8;
+.footer-inner{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
 }
-footer a{color:var(--text-secondary)}
+.footer-left{font-size:13px;color:var(--text-3)}
+.footer-right{display:flex;gap:20px}
+.footer-right a{
+  font-size:13px;
+  color:var(--text-3);
+  text-decoration:none;
+}
+.footer-right a:hover{color:var(--text-2)}
+
+/* ── Animate on scroll ── */
+.reveal{opacity:0;transform:translateY(20px);transition:opacity 0.6s,transform 0.6s}
+.reveal.visible{opacity:1;transform:none}
 
 /* ── Responsive ── */
 @media(max-width:768px){
-  html{font-size:16px}
-  .hero{padding:64px 0 48px}
-  .hero h1{font-size:2.2rem}
-  .problem-grid{grid-template-columns:1fr}
-  .step{grid-template-columns:36px 1fr;gap:16px}
-  section{padding:56px 0}
+  .hero h1{font-size:2rem}
+  .loop-grid{grid-template-columns:1fr;gap:24px}
+  .loop-grid::before{display:none}
+  .loop-dot{margin:0 auto 12px}
+  .compare{grid-template-columns:1fr}
+  .feat-grid{grid-template-columns:1fr}
+  .footer-inner{flex-direction:column;gap:12px;text-align:center}
+  .bar-row{grid-template-columns:48px 48px 1fr}
+}
+@media(max-width:480px){
+  .hero{min-height:auto;padding:48px 0}
+  .term-body{font-size:11px;padding:16px}
 }
 </style>
 </head>
 <body>
 
-<!-- Hero -->
 <section class="hero">
-  <div class="container">
-    <div class="hero-badge">Nous Research Hackathon 2026</div>
-    <h1>Your Agent, Getting Better While You Sleep</h1>
-    <p>Hermes Dojo reads your agent's session logs, finds recurring failures, and creates skills to fix them. Self-improvement that actually works.</p>
+  <div class="hero-glow"></div>
+  <div class="wrap">
+    <div class="hero-top">
+      <span class="hero-name">Hermes Dojo</span>
+      <span class="hero-tag">Nous Research Hackathon 2026</span>
+    </div>
+    <h1>Your agent makes the same mistakes <strong>every single day.</strong></h1>
+    <p class="hero-sub">Dojo reads session logs, finds the repeat failures, creates skills to fix them, and runs self-evolution overnight. You wake up to a better agent.</p>
     <div class="hero-buttons">
       <a href="https://github.com/Yonkoo11/hermes-dojo" class="btn btn-primary">
-        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-        View on GitHub
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View Source
       </a>
-      <a href="#demo" class="btn">Watch Demo</a>
+      <a href="#results" class="btn">See Results</a>
+    </div>
+
+    <div class="term" id="hero-term">
+      <div class="term-bar">
+        <div class="term-dot"></div>
+        <div class="term-dot"></div>
+        <div class="term-dot"></div>
+        <div class="term-title">hermes-dojo</div>
+      </div>
+      <div class="term-body" id="term-output">
+        <span class="line"><span class="prompt">$</span> <span class="cmd">python3 demo.py --reset --multi-day</span></span>
+        <span class="line muted">Seeding 7 days of session data...</span>
+        <span class="line">&nbsp;</span>
+        <span class="line accent">Day 1: Analyzing 12 sessions...</span>
+        <span class="line">  Found <span class="bad">8 failures</span> across 3 tools</span>
+        <span class="line">  Created skill: <span class="good">terminal-run</span> (bash error handling)</span>
+        <span class="line">  Success rate: <span class="bad">34.2%</span></span>
+        <span class="line">&nbsp;</span>
+        <span class="line accent">Day 5: Analyzing 12 sessions...</span>
+        <span class="line">  Found <span class="accent">3 failures</span> across 1 tool</span>
+        <span class="line">  Evolved skill: <span class="good">terminal-run</span> via GEPA</span>
+        <span class="line">  Success rate: <span class="good">57.1%</span> <span class="muted">(+22.9%)</span></span>
+        <span class="line">&nbsp;</span>
+        <span class="line muted">Trend: [▁▂▄▆█]  34.2% -> 57.1%</span>
+        <span class="line"><span class="cursor"></span></span>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- Problem -->
-<section>
-  <div class="container">
-    <div class="section-label">The Problem</div>
-    <div class="section-title">Your agent forgets everything</div>
-    <p class="section-desc">Every session starts from zero. Corrections vanish. The same failures repeat endlessly.</p>
-    <div class="problem-grid">
-      <div class="problem-card">
-        <h3>Same Mistakes, Every Day</h3>
-        <p>You correct a wrong git branch. Next session, same error. The agent has no memory of what went wrong.</p>
+<div class="divider"></div>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-label">The feedback loop</div>
+    <div class="loop-title">Measure weakness. <strong>Fix it.</strong> Measure again.</div>
+    <div class="loop-grid reveal">
+      <div class="loop-step">
+        <div class="loop-dot"></div>
+        <h3>Monitor</h3>
+        <p>Read session logs. Track tool errors, retries, user corrections.</p>
       </div>
-      <div class="problem-card">
-        <h3>No Feedback Signal</h3>
-        <p>86 skills installed, but which ones work? Which silently fail? Nobody tracks per-skill success rates.</p>
+      <div class="loop-step">
+        <div class="loop-dot"></div>
+        <h3>Analyze</h3>
+        <p>Rank failures by frequency and impact. Find root causes.</p>
       </div>
-      <div class="problem-card">
-        <h3>Evolution Unused</h3>
-        <p>GEPA self-evolution exists. But without knowing what to evolve, it sits idle while your agent stagnates.</p>
+      <div class="loop-step">
+        <div class="loop-dot"></div>
+        <h3>Fix</h3>
+        <p>Patch failing skills. Create missing ones. Inject config.</p>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot"></div>
+        <h3>Evolve</h3>
+        <p>Run GEPA on weak skills. DSPy optimization with real data.</p>
+      </div>
+      <div class="loop-step">
+        <div class="loop-dot"></div>
+        <h3>Report</h3>
+        <p>CLI or Telegram. Deltas, sparklines, what changed.</p>
+      </div>
+    </div>
+
+    <div class="compare reveal">
+      <div class="compare-side">
+        <div class="compare-label">Without Dojo</div>
+        <div class="compare-line"><span class="dot"></span>Same git branch error every session</div>
+        <div class="compare-line"><span class="dot"></span>Timeout loops with no backoff</div>
+        <div class="compare-line"><span class="dot"></span>86 skills, unknown success rates</div>
+        <div class="compare-line"><span class="dot"></span>GEPA sits idle, nothing to evolve</div>
+        <div class="compare-line"><span class="dot"></span>You manually correct, it forgets</div>
+      </div>
+      <div class="compare-side">
+        <div class="compare-label">With Dojo</div>
+        <div class="compare-line"><span class="dot"></span>Skill patched with branch validation</div>
+        <div class="compare-line"><span class="dot"></span>Retry logic auto-injected</div>
+        <div class="compare-line"><span class="dot"></span>Per-skill success rates tracked daily</div>
+        <div class="compare-line"><span class="dot"></span>GEPA targets weakest skills first</div>
+        <div class="compare-line"><span class="dot"></span>Overnight improvement, morning report</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- How It Works -->
-<section>
-  <div class="container">
-    <div class="section-label">How It Works</div>
-    <div class="section-title">Five steps to a smarter agent</div>
-    <p class="section-desc">Dojo closes the feedback loop. Measure, identify, fix, evolve, report.</p>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">01</div>
-        <div>
-          <h3>Monitor</h3>
-          <p>Reads session logs from state.db. Identifies tool errors, retry loops, user corrections, and explicit complaints. Computes per-skill success rates.</p>
+<section class="section">
+  <div class="wrap">
+    <div class="results reveal" id="results">
+      <div class="section-label">5-day test run</div>
+      <div class="results-title"><strong>+22.9%</strong> success rate, zero human input</div>
+      <div class="results-sub">Simulated 5 days of overnight Dojo runs on real failure patterns.</div>
+      <div class="results-bars">
+        <div class="bar-row"><span class="bar-label">Day 1</span><span class="bar-pct">34.2%</span><div class="bar-track"><div class="bar-fill" data-width="34"></div></div></div>
+        <div class="bar-row"><span class="bar-label">Day 2</span><span class="bar-pct">38.7%</span><div class="bar-track"><div class="bar-fill" data-width="39"></div></div></div>
+        <div class="bar-row"><span class="bar-label">Day 3</span><span class="bar-pct">45.1%</span><div class="bar-track"><div class="bar-fill" data-width="45"></div></div></div>
+        <div class="bar-row"><span class="bar-label">Day 4</span><span class="bar-pct">51.4%</span><div class="bar-track"><div class="bar-fill" data-width="51"></div></div></div>
+        <div class="bar-row"><span class="bar-label">Day 5</span><span class="bar-pct">57.1%</span><div class="bar-track"><div class="bar-fill" data-width="57"></div></div></div>
+      </div>
+      <div class="trend-line">Trend: 34.2% &rarr; <strong>57.1%</strong> &nbsp; Sparkline: [▁▂▄▆█]</div>
+    </div>
+
+    <div class="feat-grid reveal" style="margin-top:80px">
+      <div class="feat">
+        <div class="feat-name">Skills System</div>
+        <div class="feat-desc">Dojo is a skill that creates and patches other skills programmatically.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-name">GEPA Evolution</div>
+        <div class="feat-desc">DSPy-based prompt optimization using real failure data as the signal.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-name">Session Search</div>
+        <div class="feat-desc">Reads past sessions from state.db to identify recurring failure patterns.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-name">Cron Scheduler</div>
+        <div class="feat-desc">Runs the full improvement cycle overnight, on autopilot.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-name">Telegram Reports</div>
+        <div class="feat-desc">Morning improvement reports with deltas and sparklines.</div>
+      </div>
+      <div class="feat">
+        <div class="feat-name">skill_manage</div>
+        <div class="feat-desc">Creates, patches, and evolves skills without manual file editing.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="install reveal">
+      <div class="install-title">Get started in <strong>three commands</strong></div>
+      <div class="term">
+        <div class="term-bar">
+          <div class="term-dot"></div>
+          <div class="term-dot"></div>
+          <div class="term-dot"></div>
+          <div class="term-title">terminal</div>
+        </div>
+        <div class="term-body">
+          <span class="line"><span class="prompt">$</span> <span class="cmd">git clone https://github.com/Yonkoo11/hermes-dojo.git</span></span>
+          <span class="line"><span class="prompt">$</span> <span class="cmd">cd hermes-dojo && ./install.sh</span></span>
+          <span class="line"><span class="prompt">$</span> <span class="cmd">python3 demo.py --reset --multi-day</span></span>
         </div>
       </div>
-      <div class="step">
-        <div class="step-num">02</div>
-        <div>
-          <h3>Analyze</h3>
-          <p>Categorizes root causes and ranks weaknesses by impact. "web_extract fails 100% of the time. Root cause: no retry logic for timeouts."</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-num">03</div>
-        <div>
-          <h3>Fix</h3>
-          <p>Patches failing skills with targeted error handling. Creates new skills for missing capabilities. Injects environment variables and configuration.</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-num">04</div>
-        <div>
-          <h3>Evolve</h3>
-          <p>Runs GEPA self-evolution on weak skills. DSPy-based prompt optimization using real failure data as signal, not random mutation.</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step-num">05</div>
-        <div>
-          <h3>Report</h3>
-          <p>Generates improvement reports for CLI or Telegram. Sparklines, deltas, and actionable summaries delivered to your morning inbox.</p>
-        </div>
-      </div>
     </div>
   </div>
 </section>
 
-<!-- Proof -->
-<section>
-  <div class="container">
-    <div class="section-label">The Proof</div>
-    <div class="section-title">Measurable improvement over time</div>
-    <p class="section-desc">Five days of overnight Dojo runs. The agent goes from 34% to 57% success rate without human intervention.</p>
-    <div class="proof-container">
-      <div class="proof-header">
-        <div class="proof-dot green"></div>
-        <div class="proof-dot yellow"></div>
-        <div class="proof-dot" style="background:var(--text-muted)"></div>
-        <span>hermes-dojo — learning curve</span>
-      </div>
-      <div class="proof-body">
-<span class="dim">Date                 Success Rate   Tool Calls   Errors  Corrections</span>
-<span class="dim">────────────────────────────────────────────────────────────────────</span>
-<div class="proof-bar-row"><span style="width:160px">Day 1</span><span class="highlight" style="width:80px">34.2%</span><div class="proof-bar low" style="width:34%"></div></div>
-<div class="proof-bar-row"><span style="width:160px">Day 2</span><span class="highlight" style="width:80px">38.7%</span><div class="proof-bar low" style="width:39%"></div></div>
-<div class="proof-bar-row"><span style="width:160px">Day 3</span><span class="highlight" style="width:80px">45.1%</span><div class="proof-bar" style="width:45%"></div></div>
-<div class="proof-bar-row"><span style="width:160px">Day 4</span><span class="highlight" style="width:80px">51.4%</span><div class="proof-bar" style="width:51%"></div></div>
-<div class="proof-bar-row"><span style="width:160px">Day 5</span><span class="success" style="width:80px">57.1%</span><div class="proof-bar" style="width:57%;background:#4ade80"></div></div>
-
-<span class="dim" style="margin-top:12px;display:block">Trend: 34.2% → 57.1% (+22.9%)</span>
-<span class="dim">Sparkline: [▁▂▄▆█]</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Demo Video -->
-<section id="demo">
-  <div class="container" style="text-align:center">
-    <div class="section-label">Demo</div>
-    <div class="section-title">See it in action</div>
-    <p class="section-desc" style="margin-left:auto;margin-right:auto">Full pipeline: analyze sessions, create skills, run evolution, show improvement.</p>
-    <div class="video-wrapper">
-      <!-- Replace with YouTube embed when video is uploaded -->
-      <div class="video-placeholder">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        <span>Demo video coming soon</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Quick Start -->
-<section>
-  <div class="container">
-    <div class="section-label">Get Started</div>
-    <div class="section-title">Three commands</div>
-    <p class="section-desc">Install as a Hermes skill and run the full pipeline.</p>
-    <div class="code-block">
-      <div class="code-header">Terminal</div>
-      <div class="code-body">
-<span class="comment"># Clone and install</span>
-<span class="cmd">git clone https://github.com/Yonkoo11/hermes-dojo.git</span>
-<span class="cmd">cd hermes-dojo && ./install.sh</span>
-<br>
-<span class="comment"># Run the full demo</span>
-<span class="cmd">python3 ~/.hermes/skills/hermes-dojo/scripts/demo.py --reset --multi-day</span>
-      </div>
-    </div>
-
-    <table class="features-table">
-      <thead>
-        <tr><th>Hermes Feature</th><th>How Dojo Uses It</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Skills</td><td>Dojo is a skill that creates and patches other skills</td></tr>
-        <tr><td>GEPA</td><td>DSPy-based evolution on weak skills using failure data</td></tr>
-        <tr><td>Session Search</td><td>Reads past sessions to find failure patterns</td></tr>
-        <tr><td>Cron</td><td>Overnight improvement cycle on autopilot</td></tr>
-        <tr><td>Telegram</td><td>Morning reports delivered to your inbox</td></tr>
-        <tr><td>skill_manage</td><td>Creates and patches skills programmatically</td></tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<!-- Footer -->
 <footer>
-  <div class="container">
-    <p>
-      Built for the <a href="https://nousresearch.com">Nous Research</a> Hermes Agent Hackathon
-      <br>
-      <a href="https://github.com/Yonkoo11/hermes-dojo">GitHub</a>
-    </p>
+  <div class="wrap">
+    <div class="footer-inner">
+      <span class="footer-left">Built for the Nous Research Hermes Agent Hackathon</span>
+      <div class="footer-right">
+        <a href="https://github.com/Yonkoo11/hermes-dojo">GitHub</a>
+        <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>
+        <a href="https://nousresearch.com">Nous Research</a>
+      </div>
+    </div>
   </div>
 </footer>
+
+<script>
+// Scroll reveal
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); obs.unobserve(e.target); } });
+}, { threshold: 0.15 });
+document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+
+// Animate bars on scroll
+const barObs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.querySelectorAll('.bar-fill').forEach(bar => {
+        bar.style.width = bar.dataset.width + '%';
+      });
+      barObs.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.3 });
+document.querySelectorAll('.results-bars').forEach(el => barObs.observe(el));
+</script>
 
 </body>
 </html>
