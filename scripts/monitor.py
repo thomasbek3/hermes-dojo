@@ -317,24 +317,37 @@ def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
         }
 
     # === Analyze tool calls ===
-    tool_stats = defaultdict(lambda: {"total": 0, "errors": 0, "error_types": Counter()})
+    tool_stats = defaultdict(lambda: {
+        "total": 0,
+        "errors": 0,
+        "error_types": Counter(),
+        "first_error_at": None,
+        "last_error_at": None,
+        "last_success_at": None,
+    })
     all_errors = []
     tool_results = iter_tool_results(messages)
 
     for msg in tool_results:
         tool_name = msg["resolved_tool_name"]
-        tool_stats[tool_name]["total"] += 1
+        stats = tool_stats[tool_name]
+        stats["total"] += 1
+        timestamp = msg.get("timestamp") or 0
 
         is_error, error_type = classify_tool_result(msg.get("content", ""), tool_name)
         if is_error:
-            tool_stats[tool_name]["errors"] += 1
-            tool_stats[tool_name]["error_types"][error_type] += 1
+            stats["errors"] += 1
+            stats["error_types"][error_type] += 1
+            stats["first_error_at"] = timestamp if stats["first_error_at"] is None else min(stats["first_error_at"], timestamp)
+            stats["last_error_at"] = timestamp if stats["last_error_at"] is None else max(stats["last_error_at"], timestamp)
             all_errors.append({
                 "tool": tool_name,
                 "error": error_type,
                 "session_id": msg["session_id"],
-                "timestamp": msg["timestamp"],
+                "timestamp": timestamp,
             })
+        else:
+            stats["last_success_at"] = timestamp if stats["last_success_at"] is None else max(stats["last_success_at"], timestamp)
 
     # === Analyze user corrections ===
     corrections = []
@@ -385,12 +398,30 @@ def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
         if stats["errors"] > 0:
             success_rate = round((1 - stats["errors"] / stats["total"]) * 100, 1)
             top_error = stats["error_types"].most_common(1)
+            last_error_at = stats.get("last_error_at")
+            last_success_at = stats.get("last_success_at")
+            last_success_after_error = (
+                last_error_at is not None
+                and last_success_at is not None
+                and last_success_at > last_error_at
+            )
+            stale_failure = (
+                not last_success_after_error
+                and last_error_at is not None
+                and time.time() - last_error_at > 24 * 3600
+            )
+            status = "recovered" if last_success_after_error else "stale_failure" if stale_failure else "active_failure"
             weakest_tools.append({
                 "tool": tool_name,
                 "total": stats["total"],
                 "errors": stats["errors"],
                 "success_rate": success_rate,
                 "top_error": top_error[0][0] if top_error else "",
+                "first_error_at": stats.get("first_error_at"),
+                "last_error_at": last_error_at,
+                "last_success_at": last_success_at,
+                "last_success_after_error": last_success_after_error,
+                "status": status,
             })
 
     # Skill gaps require stronger evidence than a keyword appearing twice.

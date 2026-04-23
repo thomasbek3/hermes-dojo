@@ -30,3 +30,46 @@ def test_data_quality_blocks_autofix(monkeypatch, tmp_path):
             "retry_patterns": [], "skill_gaps": [], "data_quality": {"safe_to_autofix": False}}
     recs = analyzer.generate_recommendations(data)
     assert all(not r.get("autofix_allowed") for r in recs)
+
+
+def test_recovered_tool_failure_becomes_verification_not_patch(monkeypatch, tmp_path):
+    skill_dir = tmp_path / "browser-click"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: browser-click\nmetadata:\n  owner: user\n---\n")
+    monkeypatch.setattr(analyzer, "SKILLS_DIR", tmp_path)
+    data = {"weakest_tools": [{
+        "tool": "browser_click",
+        "total": 3,
+        "errors": 2,
+        "success_rate": 33.3,
+        "top_error": "SyntaxError: f-string: invalid syntax",
+        "status": "recovered",
+        "last_success_after_error": True,
+    }], "retry_patterns": [], "skill_gaps": [], "data_quality": {"safe_to_autofix": True}}
+    recs = analyzer.generate_recommendations(data)
+    assert recs[0]["action"] == "investigate"
+    assert recs[0]["target"] == "browser-click"
+    assert "recovered" in recs[0]["reason"].lower()
+    assert recs[0]["autofix_allowed"] is False
+
+
+def test_stale_tool_failure_becomes_verification_not_patch(monkeypatch, tmp_path):
+    skill_dir = tmp_path / "browser-click"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: browser-click\nmetadata:\n  owner: user\n---\n")
+    monkeypatch.setattr(analyzer, "SKILLS_DIR", tmp_path)
+    data = {"weakest_tools": [{
+        "tool": "browser_click",
+        "total": 2,
+        "errors": 2,
+        "success_rate": 0.0,
+        "top_error": "SyntaxError: f-string: invalid syntax",
+        "status": "stale_failure",
+        "last_success_after_error": False,
+    }], "retry_patterns": [], "skill_gaps": [], "data_quality": {"safe_to_autofix": True}}
+    recs = analyzer.generate_recommendations(data)
+    assert recs[0]["action"] == "investigate"
+    assert recs[0]["target"] == "browser-click"
+    assert "verify current behavior" in recs[0]["reason"]
+    assert recs[0]["status"] == "stale_failure"
+    assert recs[0]["autofix_allowed"] is False

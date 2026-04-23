@@ -78,6 +78,38 @@ def map_tool_to_skill(tool_name: str, existing_skills: dict[str, Path]) -> str |
     return None
 
 
+def _tool_needs_verification(tool: dict) -> bool:
+    return bool(
+        tool.get("last_success_after_error")
+        or tool.get("status") in {"recovered", "stale_failure"}
+    )
+
+
+def _recommendation_action(tool: dict, skill_name: str | None) -> str:
+    if _tool_needs_verification(tool):
+        return "investigate"
+    if skill_name:
+        return "patch"
+    return "investigate" if tool["tool"] in CORE_TOOL_NAMES else "create"
+
+
+def _reason_for_tool(tool: dict, action: str) -> str:
+    base = (
+        f"{tool['tool']} fails {tool['errors']}/{tool['total']} times "
+        f"({tool['success_rate']}% success)"
+    )
+    if _tool_needs_verification(tool):
+        status = tool.get("status")
+        if status == "stale_failure":
+            return base + "; no recent failures, so verify current behavior before patching"
+        return base + "; recovered by a later successful call, so verify/regression-test before patching"
+    if action == "investigate" and tool["tool"] in CORE_TOOL_NAMES:
+        return f"Frequently-failing core tool '{tool['tool']}' ({tool['errors']} errors)"
+    if action == "create":
+        return f"Frequently-failing tool '{tool['tool']}' ({tool['errors']} errors)"
+    return base
+
+
 def generate_recommendations(monitor_data: dict) -> list[dict[str, Any]]:
     """Generate prioritized improvement recommendations."""
     recommendations = []
@@ -90,33 +122,23 @@ def generate_recommendations(monitor_data: dict) -> list[dict[str, Any]]:
             continue  # Skip one-off errors
 
         skill_name = map_tool_to_skill(tool["tool"], existing_skills)
+        action = _recommendation_action(tool, skill_name)
+        rec = {
+            "action": action,
+            "priority": _priority_score(tool),
+            "target": skill_name if skill_name else _tool_to_skill_name(tool["tool"]),
+            "reason": _reason_for_tool(tool, action),
+            "top_error": tool["top_error"],
+            "suggested_fix": _suggest_fix(tool),
+            "autofix_allowed": autofix_allowed and action in {"patch", "create"},
+        }
         if skill_name:
-            recommendations.append({
-                "action": "patch",
-                "priority": _priority_score(tool),
-                "target": skill_name,
-                "skill_path": str(existing_skills[skill_name]),
-                "reason": f"{tool['tool']} fails {tool['errors']}/{tool['total']} times "
-                          f"({tool['success_rate']}% success)",
-                "top_error": tool["top_error"],
-                "suggested_fix": _suggest_fix(tool),
-                "autofix_allowed": autofix_allowed,
-            })
-        else:
-            action = "investigate" if tool["tool"] in CORE_TOOL_NAMES else "create"
-            # Core Hermes tools are not skill gaps; they need root-cause review
-            # or upstream/tooling fixes, not a synthetic user skill named after
-            # the tool.
-            recommendations.append({
-                "action": action,
-                "priority": _priority_score(tool),
-                "target": _tool_to_skill_name(tool["tool"]),
-                "reason": f"Frequently-failing {'core tool' if action == 'investigate' else 'tool'} '{tool['tool']}' "
-                          f"({tool['errors']} errors)",
-                "top_error": tool["top_error"],
-                "suggested_fix": _suggest_fix(tool),
-                "autofix_allowed": autofix_allowed,
-            })
+            rec["skill_path"] = str(existing_skills[skill_name])
+        if _tool_needs_verification(tool):
+            rec["status"] = tool.get("status", "recovered")
+            rec["suggested_fix"] = "Add or run a regression/smoke test; do not patch live code from stale historical failures"
+            rec["autofix_allowed"] = False
+        recommendations.append(rec)
 
     # 2. Create recommendations for high-confidence skill gaps only.
     for gap in monitor_data.get("skill_gaps", []):
