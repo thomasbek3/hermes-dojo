@@ -12,6 +12,7 @@ Usage:
     python3 monitor.py --session-id X     # Analyze specific session
 """
 
+import hashlib
 import json
 import os
 import re
@@ -87,58 +88,175 @@ REQUEST_PATTERNS = [
 ]
 
 
-def classify_tool_result(content: str) -> tuple[bool, str]:
-    """Classify a tool result as success or failure, return (is_error, error_type)."""
+def classify_tool_result(content: str, tool_name: str = "") -> tuple[bool, str]:
+    """Classify a tool result as success/failure with tool-aware JSON handling."""
     if not content:
         return False, ""
 
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        payload = None
+
+    if isinstance(payload, dict):
+        if payload.get("success") is False or payload.get("status") in {"error", "failed", "failure"}:
+            err = payload.get("error") or payload.get("message") or payload.get("output") or "reported failure"
+            return True, str(err)[:160].replace("\n", " ")
+        exit_code = payload.get("exit_code")
+        if payload.get("error"):
+            return True, str(payload.get("error"))[:160].replace("\n", " ")
+        if isinstance(exit_code, int) and exit_code != 0:
+            err = payload.get("error") or payload.get("stderr") or payload.get("output") or ""
+            return True, f"exit_code={exit_code} {str(err)[:140]}".strip().replace("\n", " ")
+
+        content_tools = {
+            "read_file", "search_files", "skill_view", "skills_list",
+            "browser_snapshot", "browser_console", "browser_vision",
+            "session_search", "execute_code", "terminal", "write_file",
+            "patch", "todo", "memory", "cronjob",
+        }
+        if tool_name in content_tools:
+            return False, ""
+
+        scan_parts = []
+        for key in ("error", "stderr"):
+            val = payload.get(key)
+            if val:
+                scan_parts.append(str(val))
+        scan_text = "\n".join(scan_parts)
+        if not scan_text:
+            return False, ""
+    else:
+        scan_text = content
+
     for pattern in ERROR_PATTERNS:
-        match = re.search(pattern, content)
+        match = re.search(pattern, scan_text)
         if match:
-            # Extract a short error description
             start = max(0, match.start() - 10)
-            end = min(len(content), match.end() + 50)
-            snippet = content[start:end].strip().replace("\n", " ")
+            end = min(len(scan_text), match.end() + 80)
+            snippet = scan_text[start:end].strip().replace("\n", " ")
             return True, snippet
 
     return False, ""
 
 
-def detect_retry_patterns(messages: list[dict]) -> list[dict]:
-    """Detect when the same tool is called multiple times in quick succession (retry loop)."""
-    retries = []
-    prev_tool = None
-    prev_time = 0
-    prev_session = None
-    consecutive_count = 0
+def _hash_args(value: Any) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
+    return hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+
+def parse_tool_calls(raw: Any) -> list[dict]:
+    """Parse Hermes assistant.tool_calls across OpenAI/Codex storage shapes."""
+    if not raw:
+        return []
+    try:
+        calls = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if isinstance(calls, dict):
+        calls = [calls]
+    if not isinstance(calls, list):
+        return []
+
+    parsed = []
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+        name = call.get("name") or fn.get("name")
+        if not name:
+            continue
+        args = call.get("arguments") or fn.get("arguments") or ""
+        parsed.append({
+            "id": call.get("id") or call.get("call_id") or call.get("tool_call_id"),
+            "name": str(name),
+            "args_hash": _hash_args(args),
+        })
+    return parsed
+
+
+def iter_tool_results(messages: list[dict]) -> list[dict]:
+    """Return tool result records with names resolved from current Hermes schema."""
+    pending_by_id: dict[str, dict] = {}
+    pending_fifo: dict[str, list[dict]] = defaultdict(list)
+    results = []
 
     for msg in messages:
-        if msg["role"] == "assistant" and msg.get("tool_calls"):
-            try:
-                calls = json.loads(msg["tool_calls"]) if isinstance(msg["tool_calls"], str) else msg["tool_calls"]
-                for call in (calls if isinstance(calls, list) else [calls]):
-                    tool_name = call.get("name") or call.get("function", {}).get("name", "")
-                    ts = msg["timestamp"]
-                    if tool_name == prev_tool and (ts - prev_time) < 30:
-                        consecutive_count += 1
-                    else:
-                        if consecutive_count >= 2:
-                            retries.append({
-                                "tool": prev_tool,
-                                "count": consecutive_count + 1,
-                                "session_id": prev_session,
-                            })
-                        consecutive_count = 0
-                    prev_tool = tool_name
-                    prev_time = ts
-                    prev_session = msg["session_id"]
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                continue
+        role = msg.get("role")
+        sid = msg.get("session_id")
+        if role == "assistant":
+            for call in parse_tool_calls(msg.get("tool_calls")):
+                if call.get("id"):
+                    pending_by_id[str(call["id"])] = call
+                pending_fifo[sid].append(call)
+        elif role == "tool":
+            tool_name = msg.get("tool_name")
+            method = "explicit" if tool_name else "unknown"
+            args_hash = ""
+            call_id = msg.get("tool_call_id")
+            if not tool_name and call_id and str(call_id) in pending_by_id:
+                call = pending_by_id[str(call_id)]
+                tool_name = call["name"]
+                args_hash = call.get("args_hash", "")
+                method = "id"
+            if not tool_name and pending_fifo.get(sid):
+                call = pending_fifo[sid].pop(0)
+                tool_name = call["name"]
+                args_hash = call.get("args_hash", "")
+                method = "fifo"
+            if not tool_name:
+                tool_name = "unknown"
+            row = dict(msg)
+            row["resolved_tool_name"] = tool_name
+            row["resolution_method"] = method
+            row["args_hash"] = args_hash
+            results.append(row)
+    return results
 
-    if consecutive_count >= 2:
-        retries.append({"tool": prev_tool, "count": consecutive_count + 1, "session_id": prev_session})
+
+def detect_retry_patterns(messages: list[dict]) -> list[dict]:
+    """Detect likely retry loops: same session + same tool + same args in quick succession."""
+    retries = []
+    by_session: dict[str, list[dict]] = defaultdict(list)
+    for msg in messages:
+        by_session[msg.get("session_id")].append(msg)
+
+    for sid, session_messages in by_session.items():
+        prev_key = None
+        prev_time = 0
+        consecutive_count = 0
+        for msg in session_messages:
+            if msg.get("role") != "assistant":
+                continue
+            for call in parse_tool_calls(msg.get("tool_calls")):
+                key = (call["name"], call.get("args_hash"))
+                ts = msg["timestamp"]
+                if key == prev_key and (ts - prev_time) < 30:
+                    consecutive_count += 1
+                else:
+                    if consecutive_count >= 2 and prev_key:
+                        retries.append({"tool": prev_key[0], "count": consecutive_count + 1, "session_id": sid})
+                    consecutive_count = 0
+                prev_key = key
+                prev_time = ts
+        if consecutive_count >= 2 and prev_key:
+            retries.append({"tool": prev_key[0], "count": consecutive_count + 1, "session_id": sid})
 
     return retries
+
+
+def _is_real_user_task(content: str) -> bool:
+    """Filter out cron/system wrappers, pasted transcripts, and huge blobs."""
+    if not content:
+        return False
+    stripped = content.strip()
+    if stripped.startswith("[SYSTEM:") or stripped.startswith("[System note:"):
+        return False
+    if "<memory-context>" in stripped or "Conversation started:" in stripped:
+        return False
+    if len(stripped) > 1800:
+        return False
+    return True
 
 
 def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
@@ -146,65 +264,82 @@ def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
     if not DB_PATH.exists():
         return {"error": f"Database not found at {DB_PATH}"}
 
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    try:
+        conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.25)
+        conn.row_factory = sqlite3.Row
 
-    cutoff = time.time() - (days * 86400)
+        cutoff = time.time() - (days * 86400)
 
-    # Get sessions
-    if session_id:
-        sessions = conn.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        # Get sessions
+        if session_id:
+            sessions = conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchall()
+        else:
+            sessions = conn.execute(
+                "SELECT * FROM sessions WHERE started_at > ? ORDER BY started_at DESC",
+                (cutoff,),
+            ).fetchall()
+
+        if not sessions:
+            conn.close()
+            return {
+                "sessions_analyzed": 0,
+                "message": "No sessions found in the specified time range.",
+                "data_quality": {"safe_to_autofix": False},
+            }
+
+        session_ids = [s["id"] for s in sessions]
+        placeholders = ",".join("?" for _ in session_ids)
+
+        # Get all messages for these sessions
+        messages = conn.execute(
+            f"SELECT * FROM messages WHERE session_id IN ({placeholders}) ORDER BY timestamp",
+            session_ids,
         ).fetchall()
-    else:
-        sessions = conn.execute(
-            "SELECT * FROM sessions WHERE started_at > ? ORDER BY started_at DESC",
-            (cutoff,),
-        ).fetchall()
-
-    if not sessions:
+        messages = [dict(m) for m in messages]
         conn.close()
+    except sqlite3.OperationalError as exc:
         return {
+            "error": f"Database unavailable: {exc}",
             "sessions_analyzed": 0,
-            "message": "No sessions found in the specified time range.",
+            "total_tool_calls": 0,
+            "total_errors": 0,
+            "overall_success_rate": 0.0,
+            "weakest_tools": [],
+            "tool_stats": {},
+            "user_corrections": 0,
+            "correction_samples": [],
+            "retry_patterns": [],
+            "skill_gaps": [],
+            "total_messages": 0,
+            "data_quality": {"safe_to_autofix": False, "error": str(exc)},
         }
-
-    session_ids = [s["id"] for s in sessions]
-    placeholders = ",".join("?" for _ in session_ids)
-
-    # Get all messages for these sessions
-    messages = conn.execute(
-        f"SELECT * FROM messages WHERE session_id IN ({placeholders}) ORDER BY timestamp",
-        session_ids,
-    ).fetchall()
-    messages = [dict(m) for m in messages]
-
-    conn.close()
 
     # === Analyze tool calls ===
     tool_stats = defaultdict(lambda: {"total": 0, "errors": 0, "error_types": Counter()})
     all_errors = []
+    tool_results = iter_tool_results(messages)
 
-    for msg in messages:
-        if msg["role"] == "tool" and msg.get("tool_name"):
-            tool_name = msg["tool_name"]
-            tool_stats[tool_name]["total"] += 1
+    for msg in tool_results:
+        tool_name = msg["resolved_tool_name"]
+        tool_stats[tool_name]["total"] += 1
 
-            is_error, error_type = classify_tool_result(msg.get("content", ""))
-            if is_error:
-                tool_stats[tool_name]["errors"] += 1
-                tool_stats[tool_name]["error_types"][error_type] += 1
-                all_errors.append({
-                    "tool": tool_name,
-                    "error": error_type,
-                    "session_id": msg["session_id"],
-                    "timestamp": msg["timestamp"],
-                })
+        is_error, error_type = classify_tool_result(msg.get("content", ""), tool_name)
+        if is_error:
+            tool_stats[tool_name]["errors"] += 1
+            tool_stats[tool_name]["error_types"][error_type] += 1
+            all_errors.append({
+                "tool": tool_name,
+                "error": error_type,
+                "session_id": msg["session_id"],
+                "timestamp": msg["timestamp"],
+            })
 
     # === Analyze user corrections ===
     corrections = []
     for msg in messages:
-        if msg["role"] == "user" and msg.get("content"):
+        if msg["role"] == "user" and msg.get("content") and _is_real_user_task(msg["content"]):
             content = msg["content"]
             for pattern in CORRECTION_PATTERNS:
                 if re.search(pattern, content):
@@ -217,12 +352,16 @@ def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
                     break
 
     # === Detect skill gaps ===
-    skill_gaps = Counter()
+    skill_gaps = defaultdict(lambda: {"count": 0, "sessions": set(), "samples": []})
     for msg in messages:
-        if msg["role"] == "user" and msg.get("content"):
+        if msg["role"] == "user" and msg.get("content") and _is_real_user_task(msg["content"]):
             for pattern, gap_name in REQUEST_PATTERNS:
                 if re.search(pattern, msg["content"]):
-                    skill_gaps[gap_name] += 1
+                    entry = skill_gaps[gap_name]
+                    entry["count"] += 1
+                    entry["sessions"].add(msg["session_id"])
+                    if len(entry["samples"]) < 3:
+                        entry["samples"].append(msg["content"][:120])
 
     # === Detect retry patterns ===
     retries = detect_retry_patterns(messages)
@@ -254,12 +393,29 @@ def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
                 "top_error": top_error[0][0] if top_error else "",
             })
 
-    # Skill gaps that appeared 2+ times
+    # Skill gaps require stronger evidence than a keyword appearing twice.
     recurring_gaps = [
-        {"capability": name, "requests": count}
-        for name, count in skill_gaps.most_common(10)
-        if count >= 2
-    ]
+        {
+            "capability": name,
+            "requests": data["count"],
+            "sessions": len(data["sessions"]),
+            "samples": data["samples"],
+            "confidence": "high" if data["count"] >= 5 and len(data["sessions"]) >= 3 else "low",
+        }
+        for name, data in sorted(skill_gaps.items(), key=lambda item: item[1]["count"], reverse=True)
+        if data["count"] >= 2
+    ][:10]
+
+    declared_tool_calls = sum(int(s["tool_call_count"] or 0) for s in sessions)
+    resolution_counts = Counter(r.get("resolution_method", "unknown") for r in tool_results)
+    low_confidence_resolutions = resolution_counts.get("fifo", 0) + resolution_counts.get("unknown", 0)
+    session_tool_mismatches = []
+    actual_by_session = Counter(r["session_id"] for r in tool_results)
+    for s in sessions:
+        declared = int(s["tool_call_count"] or 0)
+        actual = actual_by_session.get(s["id"], 0)
+        if declared != actual:
+            session_tool_mismatches.append({"session_id": s["id"], "declared": declared, "actual": actual})
 
     result = {
         "timestamp": time.time(),
@@ -269,11 +425,34 @@ def analyze_sessions(days: int = 7, session_id: str = None) -> dict[str, Any]:
         "total_errors": total_errors,
         "overall_success_rate": overall_success,
         "weakest_tools": weakest_tools[:10],
+        "tool_stats": {
+            name: {
+                "total": stats["total"],
+                "errors": stats["errors"],
+                "success_rate": round((1 - stats["errors"] / max(stats["total"], 1)) * 100, 1),
+            }
+            for name, stats in sorted(tool_stats.items())
+        },
         "user_corrections": len(corrections),
         "correction_samples": corrections[:5],
         "retry_patterns": retries,
         "skill_gaps": recurring_gaps,
         "total_messages": len(messages),
+        "data_quality": {
+            "declared_tool_calls": declared_tool_calls,
+            "actual_tool_result_rows": len(tool_results),
+            "tool_call_count_delta": len(tool_results) - declared_tool_calls,
+            "resolution_counts": dict(resolution_counts),
+            "low_confidence_resolutions": low_confidence_resolutions,
+            "low_confidence_resolution_rate": round(low_confidence_resolutions / max(len(tool_results), 1), 4),
+            "session_tool_mismatches": session_tool_mismatches[:20],
+            "safe_to_autofix": (
+                total_tool_calls > 0
+                and len(sessions) >= 5
+                and len(tool_results) >= 50
+                and low_confidence_resolutions / max(len(tool_results), 1) <= 0.02
+            ),
+        },
         "sessions": [
             {
                 "id": s["id"],

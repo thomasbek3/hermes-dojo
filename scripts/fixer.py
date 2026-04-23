@@ -122,6 +122,7 @@ def generate_skill_patch(rec: dict) -> dict:
         "error_type": error_type,
         "patch_description": strategy["patch"],
         "skill_addition": strategy["skill_addition"],
+        "autofix_allowed": rec.get("autofix_allowed", False),
         "tool_instruction": {
             "tool": "skill_manage",
             "action": "patch",
@@ -151,6 +152,7 @@ def generate_skill_creation(rec: dict) -> dict:
         "action": "create",
         "target": skill_name,
         "skill_content": skill_content,
+        "autofix_allowed": rec.get("autofix_allowed", False),
         "tool_instruction": {
             "tool": "skill_manage",
             "action": "create",
@@ -470,8 +472,41 @@ def _load_openrouter_key() -> str:
     return ""
 
 
-# Default model for self-evolution — Nous Hermes via OpenRouter
-DEFAULT_EVOLUTION_MODEL = "openrouter/nousresearch/hermes-3-llama-3.1-70b"
+# Default model for self-evolution — Hermes OpenAI Codex OAuth, no paid API-token route
+DEFAULT_EVOLUTION_MODEL = "openai-codex/gpt-5.4"
+
+
+def _bundled_skill_names() -> set[str]:
+    manifest = SKILLS_DIR / ".bundled_manifest"
+    if not manifest.exists():
+        return set()
+    names = set()
+    for line in manifest.read_text(errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        names.add(Path(line).parts[-1])
+    return names
+
+
+def _skill_is_user_owned(skill_dir: Path) -> bool:
+    try:
+        resolved = skill_dir.resolve()
+        root = SKILLS_DIR.resolve()
+        if root not in resolved.parents and resolved != root:
+            return False
+        if skill_dir.name in _bundled_skill_names():
+            return False
+        text = (skill_dir / "SKILL.md").read_text(errors="replace")
+        return "owner: user" in text or "generated_by: hermes-dojo" in text
+    except Exception:
+        return False
+
+
+def _backup_skill(skill_md: Path) -> Path:
+    backup = skill_md.with_name(f"SKILL.md.bak.{int(time.time())}")
+    backup.write_text(skill_md.read_text(errors="replace"))
+    return backup
 
 
 def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -> dict:
@@ -487,7 +522,7 @@ def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -
     if dry_run:
         result["status"] = "dry_run"
         result["command"] = (
-            f"cd {EVOLUTION_DIR} && OPENROUTER_API_KEY=<key> {EVOLUTION_VENV} -m evolution.skills.evolve_skill "
+            f"cd {EVOLUTION_DIR} && {EVOLUTION_VENV} -m evolution.skills.evolve_skill "
             f"--skill {skill_name} --hermes-repo {HERMES_HOME} --iterations {iterations} "
             f"--optimizer-model {DEFAULT_EVOLUTION_MODEL} --eval-model {DEFAULT_EVOLUTION_MODEL}"
         )
@@ -496,12 +531,6 @@ def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -
     if not EVOLUTION_VENV.exists():
         result["status"] = "error"
         result["error"] = "Self-evolution venv not found. Run: cd ~/.hermes/hermes-agent-self-evolution && python3 -m venv .venv && source .venv/bin/activate && pip install -e ."
-        return result
-
-    api_key = _load_openrouter_key()
-    if not api_key:
-        result["status"] = "error"
-        result["error"] = "OPENROUTER_API_KEY not set. Add it to ~/.hermes/.env or set as environment variable."
         return result
 
     try:
@@ -516,7 +545,9 @@ def run_evolution(skill_name: str, iterations: int = 5, dry_run: bool = False) -
         ]
 
         env = os.environ.copy()
-        env["OPENROUTER_API_KEY"] = api_key
+        env.pop("OPENAI_API_KEY", None)
+        env.pop("OPENROUTER_API_KEY", None)
+        env["HERMES_SELF_EVOLUTION_PROVIDER"] = "openai-codex"
 
         proc = subprocess.run(
             cmd,
@@ -562,6 +593,7 @@ def generate_fix_plan(recommendations: list[dict], evolve: bool = False, dry_run
         "patches": [],
         "creations": [],
         "evolutions": [],
+        "investigations": [],
         "summary": {},
     }
 
@@ -575,13 +607,20 @@ def generate_fix_plan(recommendations: list[dict], evolve: bool = False, dry_run
             plan["creations"].append(creation)
 
         elif rec["action"] == "evolve" and evolve:
-            evo_result = run_evolution(rec["target"], iterations=5, dry_run=dry_run)
-            plan["evolutions"].append(evo_result)
+            evo = dict(rec)
+            evo.setdefault("skill", rec["target"])
+            evo.setdefault("iterations", 5)
+            evo["dry_run"] = dry_run
+            plan["evolutions"].append(evo)
+
+        elif rec["action"] == "investigate":
+            plan["investigations"].append(dict(rec))
 
     plan["summary"] = {
         "patches": len(plan["patches"]),
         "creations": len(plan["creations"]),
         "evolutions": len(plan["evolutions"]),
+        "investigations": len(plan["investigations"]),
         "total_actions": len(plan["patches"]) + len(plan["creations"]) + len(plan["evolutions"]),
     }
 
@@ -589,48 +628,76 @@ def generate_fix_plan(recommendations: list[dict], evolve: bool = False, dry_run
 
 
 def apply_fixes(plan: dict) -> list[dict]:
-    """Apply fixes from the plan. Returns list of applied improvements."""
+    """Apply safe fixes only. Returns list of applied/skipped improvements."""
     improvements = []
 
     for p in plan["patches"]:
+        if not p.get("autofix_allowed"):
+            improvements.append({"action": "skip", "target": p.get("target"), "reason": "autofix not allowed by analyzer/data-quality gate"})
+            continue
         skill_path = p.get("skill_path")
-        if skill_path and Path(skill_path).exists():
-            skill_md = Path(skill_path) / "SKILL.md"
-            if skill_md.exists():
-                # Append the fix addition to the skill file
-                with open(skill_md, "a") as f:
-                    f.write("\n\n" + p["skill_addition"])
-
-                improvements.append({
-                    "action": "patch",
-                    "target": p["target"],
-                    "description": p["patch_description"],
-                    "error_type": p["error_type"],
-                })
+        if not skill_path:
+            continue
+        skill_dir = Path(skill_path)
+        if not _skill_is_user_owned(skill_dir):
+            improvements.append({"action": "skip", "target": p.get("target"), "reason": "skill is not marked owner:user/generated_by:hermes-dojo or is bundled"})
+            continue
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        marker = f"<!-- dojo-fix:{p['target']}:{p['error_type']} -->"
+        current = skill_md.read_text(errors="replace")
+        if marker in current:
+            improvements.append({"action": "skip", "target": p["target"], "reason": "idempotent marker already present"})
+            continue
+        _backup_skill(skill_md)
+        skill_md.write_text(current + "\n\n" + marker + "\n" + p["skill_addition"] + "\n")
+        improvements.append({
+            "action": "patch",
+            "target": p["target"],
+            "description": p["patch_description"],
+            "error_type": p["error_type"],
+        })
 
     for creation in plan["creations"]:
+        if not creation.get("autofix_allowed"):
+            improvements.append({"action": "skip", "target": creation.get("target"), "reason": "creation needs stronger evidence/manual review"})
+            continue
         skill_dir = SKILLS_DIR / creation["target"]
-        if not skill_dir.exists():
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            skill_md = skill_dir / "SKILL.md"
-            with open(skill_md, "w") as f:
-                f.write(creation["skill_content"])
-
-            improvements.append({
-                "action": "create",
-                "target": creation["target"],
-                "description": f"Created new skill for {creation['target']}",
-            })
+        if skill_dir.exists() or skill_dir.name in _bundled_skill_names():
+            continue
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        skill_md = skill_dir / "SKILL.md"
+        skill_md.write_text(creation["skill_content"])
+        improvements.append({
+            "action": "create",
+            "target": creation["target"],
+            "description": f"Created new skill for {creation['target']}",
+        })
 
     for evo in plan.get("evolutions", []):
-        if evo["status"] == "completed":
+        skill_name = evo.get("skill") or evo.get("target")
+        skill_path = evo.get("skill_path")
+        if not evo.get("autofix_allowed"):
+            improvements.append({"action": "skip", "target": skill_name, "reason": "evolution not allowed by analyzer/data-quality gate"})
+            continue
+        if skill_path and not _skill_is_user_owned(Path(skill_path)):
+            improvements.append({"action": "skip", "target": skill_name, "reason": "skill is not marked owner:user/generated_by:hermes-dojo or is bundled"})
+            continue
+        if evo.get("status") == "completed":
+            result = evo
+        else:
+            result = run_evolution(skill_name, iterations=int(evo.get("iterations", 5)), dry_run=bool(evo.get("dry_run", True)))
+        if result.get("status") == "completed":
             improvements.append({
                 "action": "evolve",
-                "target": evo["skill"],
-                "description": f"Self-evolved with {evo['iterations']} iterations",
-                "before_score": evo.get("before_score"),
-                "after_score": evo.get("after_score"),
+                "target": result["skill"],
+                "description": f"Self-evolved with {result['iterations']} iterations",
+                "before_score": result.get("before_score"),
+                "after_score": result.get("after_score"),
             })
+        else:
+            improvements.append({"action": "skip", "target": skill_name, "reason": f"evolution {result.get('status')}: {result.get('error','dry run or no improvement')}"})
 
     return improvements
 
