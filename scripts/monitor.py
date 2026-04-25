@@ -88,14 +88,32 @@ REQUEST_PATTERNS = [
 ]
 
 
+def _base_tool_name(tool_name: str) -> str:
+    """Normalize namespaced Hermes tool names like functions.read_file."""
+    return (tool_name or "").split(".")[-1]
+
+
 def classify_tool_result(content: str, tool_name: str = "") -> tuple[bool, str]:
     """Classify a tool result as success/failure with tool-aware JSON handling."""
     if not content:
         return False, ""
 
+    base_tool_name = _base_tool_name(tool_name)
+
+    structured_tools = {
+        "read_file", "search_files", "skill_view", "skills_list",
+        "browser_snapshot", "browser_console", "browser_vision",
+        "session_search", "execute_code", "terminal", "write_file",
+        "patch", "todo", "memory", "cronjob",
+    }
+
     try:
         payload = json.loads(content)
     except (json.JSONDecodeError, TypeError):
+        # Structured Hermes tool outputs can contain arbitrary user/file prose.
+        # If the wrapper is malformed/concatenated, do not regex-scan it as an error.
+        if base_tool_name in structured_tools:
+            return False, ""
         payload = None
 
     if isinstance(payload, dict):
@@ -109,13 +127,7 @@ def classify_tool_result(content: str, tool_name: str = "") -> tuple[bool, str]:
             err = payload.get("error") or payload.get("stderr") or payload.get("output") or ""
             return True, f"exit_code={exit_code} {str(err)[:140]}".strip().replace("\n", " ")
 
-        content_tools = {
-            "read_file", "search_files", "skill_view", "skills_list",
-            "browser_snapshot", "browser_console", "browser_vision",
-            "session_search", "execute_code", "terminal", "write_file",
-            "patch", "todo", "memory", "cronjob",
-        }
-        if tool_name in content_tools:
+        if base_tool_name in structured_tools:
             return False, ""
 
         scan_parts = []

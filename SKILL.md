@@ -133,6 +133,47 @@ Set up a cron job that runs at 6:00 AM daily:
 
 This makes the agent literally improve while you sleep.
 
+## Safe Proposal Mode
+
+When the task explicitly says SAFE PROPOSAL MODE:
+
+- Run analysis and reporting normally, but do not create, patch, or evolve skills unless the target skill is explicitly marked `metadata.hermes.generated_by: hermes-dojo` or `metadata.hermes.owner: user` and the change is low-risk, idempotent, backed up, and verified.
+- In cron/autonomous runs, never call `clarify`. That tool is unavailable in cron execution contexts, so choose a reasonable default and report assumptions/skips instead of trying to ask the user.
+- Fail closed on improvements if Dojo reports database unavailable/locked, zero tool calls, contradictory metrics, parser errors, weak evidence, or fewer than 5 independent requests across 3 sessions for a claimed skill gap.
+- Treat likely parser false positives as investigations, not fix candidates. In practice this includes `read_file` / `search_files` outputs whose file contents merely contain words like `error`, `exception`, or `unauthorized`.
+- If `skill_view` failures come from category-qualified names like `category:skill`, report that as a routing/documentation issue first. Confirm whether the skill loads unqualified before proposing any patch.
+- After analysis, persist the snapshot with `python3 ~/.hermes/skills/hermes-dojo/scripts/tracker.py save` so the next run has a comparison baseline.
+- Only run Hermes Agent Self-Evolution with Hermes OpenAI Codex OAuth models (`openai-codex/gpt-5.5`) unless `HERMES_SELF_EVOLUTION_ALLOW_PAID_API=1` is explicitly set.
+
+## Daily Safe Proposal Audit Add-ons
+
+For Thomas's 6am Dojo SAFE PROPOSAL MODE run, the useful workflow is broader than the basic monitor/report loop:
+
+1. Run the normal Dojo commands:
+   - `python3 ~/.hermes/skills/hermes-dojo/scripts/monitor.py`
+   - `python3 ~/.hermes/skills/hermes-dojo/scripts/monitor.py --json` when exact fields are needed
+   - `python3 ~/.hermes/skills/hermes-dojo/scripts/reporter.py`
+   - `python3 ~/.hermes/skills/hermes-dojo/scripts/tracker.py save`
+   - `python3 ~/.hermes/skills/hermes-dojo/scripts/tracker.py history`
+2. Run Skill Doctor as a parallel library-health pass:
+   - `python3 ~/.hermes/skills/autonomous-ai-agents/skill-doctor/scripts/skill_doctor.py`
+3. Add focused investigations for Thomas's recurring quality concerns:
+   - duplicate or overlapping meta-skills, especially self-improvement / skill-promotion / audit skills
+   - unverified operational claims; cross-check against the `verify-before-claim` skill before proposing changes
+   - todo source-of-truth drift; distinguish real todo-tool misuse from context-compaction/report mentions
+   - stale model/version references such as GPT/Codex/Claude model strings; propose the model-upgrade workflow rather than opportunistic patching
+   - skill-promotion quality: promoted skills should be discoverable, non-duplicative, have triggers/procedure/pitfalls/verification, and be audited after creation
+4. Fail closed on weak evidence:
+   - Do not promote a skill gap unless it has at least 5 independent requests across 3 sessions.
+   - Treat `read_file` / `search_files` "errors" caused by file prose containing words like `error`, `exception`, or `unauthorized` as parser false positives unless explicit tool failure metadata confirms failure.
+   - If a skill gap already has a relevant skill, report it as routing/reuse drift rather than creating another skill.
+5. Report concise actions, not a raw dump:
+   - metrics and trend
+   - any safe changes actually made
+   - highest-confidence proposed fixes
+   - rejected false positives and why
+   - next audit targets
+
 ## Important Notes
 
 - Never modify bundled skills (in hermes-agent/skills/). Only modify user skills in ~/.hermes/skills/
